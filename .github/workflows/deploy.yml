@@ -1,0 +1,53 @@
+name: CloudNova CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validar-e-testar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Obter código
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Construir imagem Docker
+        run: docker build -t cloudnova:test .
+
+      - name: Validar código Python
+        run: |
+          docker run --rm cloudnova:test \
+            python -c "import ast; ast.parse(open('sergiomorais.py').read())"
+
+      - name: Iniciar contentor
+        run: |
+          docker run -d --name cloudnova-test \
+            -p 127.0.0.1:8080:8080 cloudnova:test
+
+      - name: Testar aplicação
+        run: |
+          curl --fail --silent --show-error \
+            --retry 10 --retry-connrefused --retry-delay 2 \
+            http://127.0.0.1:8080/health > health.json
+
+          python3 -c \
+            "import json; assert json.load(open('health.json')) == {'status': 'ok'}"
+
+          curl --fail --silent --show-error \
+            http://127.0.0.1:8080/ > /dev/null
+
+      - name: Mostrar logs
+        if: always()
+        run: docker logs cloudnova-test || true
+
+      - name: Remover contentor de teste
+        if: always()
+        run: docker rm -f cloudnova-test || true
